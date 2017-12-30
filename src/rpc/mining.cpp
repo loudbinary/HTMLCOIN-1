@@ -516,6 +516,7 @@ UniValue getwork(const JSONRPCRequest& request)
         IncrementExtraNonce(pblock, pindexPrev, nExtraNonce);
 
         // Save
+        LogPrintf("%s: mapNewBlock save hashMerkleRoot: %s\n", __func__, pblock->hashMerkleRoot.ToString().c_str());
         mapNewBlock[pblock->hashMerkleRoot] = std::make_pair(pblock, pblock->vtx[0]->vin[0].scriptSig);
 
         // Pre-build hash buffers
@@ -537,17 +538,40 @@ UniValue getwork(const JSONRPCRequest& request)
     {
         // Parse parameters
         std::vector<unsigned char> vchData = ParseHex(request.params[0].get_str());
-        if (vchData.size() != 128)
+
+        if (vchData.size() != 128) {
+            LogPrintf("%s: Invalid parameter vchData.size(): %u\n", __func__, vchData.size());
             throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter");
+        }
         CBlock* pdata = (CBlock*)&vchData[0];
+
+        /* Dump block data received */
+        unsigned int i, size;
+        size = (unsigned int)vchData.size();
+        LogPrintf("%s: Before ByteReverse Block data %u bytes Rx: ", __func__, size);
+        for(i = 0; i < size; i++)
+            LogPrintf("%02X", ((unsigned char *)&vchData[0])[i]);
+        LogPrintf("\n");
+
+        LogPrintf("%s: hashMerkleRoot pre-ByteReverse: %s\n", __func__, pdata->hashMerkleRoot.ToString().c_str());
 
         // Byte reverse
         for (int i = 0; i < 128/4; i++)
             ((unsigned int*)pdata)[i] = ByteReverse(((unsigned int*)pdata)[i]);
 
+        /* Dump block data received */
+        size = (unsigned int)vchData.size();
+        LogPrintf("%s: After ByteReverse Block data %u bytes Rx: ", __func__, size);
+        for(i = 0; i < size; i++)
+            LogPrintf("%02X", ((unsigned char *)&vchData[0])[i]);
+        LogPrintf("\n");
+
         // Get saved block
-        if (!mapNewBlock.count(pdata->hashMerkleRoot))
-            return false;
+        if (!mapNewBlock.count(pdata->hashMerkleRoot)) {
+            LogPrintf("%s: Previous block contents not found. hashMerkleRoot: %s\n", __func__, pdata->hashMerkleRoot.ToString().c_str());
+            throw JSONRPCError(RPC_VERIFY_ERROR, "Previous block contents not found");
+        }
+
         CBlock* pblock = mapNewBlock[pdata->hashMerkleRoot].first;
 
         pblock->nTime = pdata->nTime;
@@ -559,8 +583,11 @@ UniValue getwork(const JSONRPCRequest& request)
         pblock->vtx[0] = MakeTransactionRef(std::move(newTx));
         pblock->hashMerkleRoot = BlockMerkleRoot(*pblock);
 
+        LogPrintf("%s: getwork Block submitted: %s", __func__, pblock->ToString().c_str());
+
         assert(pwalletMain != NULL);
         const CChainParams& chainParams = Params();
+        LogPrintf("%s: Entering CheckWork\n");
         return CheckWork(chainParams, pblock, *pwalletMain, *pMiningKey);
     }
 }
